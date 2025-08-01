@@ -519,9 +519,11 @@ dependencies = [
  "fred",
  "futures",
  "mcache-core",
- "mcache-macro",
+ "proc-macro2",
+ "quote",
+ "regex",
  "serde",
- "serde_json",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -530,16 +532,6 @@ version = "0.1.0"
 dependencies = [
  "fred",
  "once_cell",
-]
-
-[[package]]
-name = "mcache-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "regex",
- "syn 1.0.109",
 ]
 
 [[package]]
