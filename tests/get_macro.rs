@@ -1,5 +1,5 @@
 use fred::prelude::{self as Redis, *};
-use mcache::{mcache_core, mcache_macro};
+use mcache::{mcache_attr, mcache_core};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -28,7 +28,7 @@ async fn setup() {
     mcache_core::init(redis_pool);
 }
 
-#[mcache_macro::get("user:{id}-{token}", ttl = 100)]
+#[mcache_attr::get("user:{id}-{token}", ttl = 100)]
 async fn fetch_user(id: u64, token: String, cache_missed: &mut bool) -> Option<User> {
     println!("Async cache miss...");
     *cache_missed = true;
@@ -41,7 +41,7 @@ async fn fetch_user(id: u64, token: String, cache_missed: &mut bool) -> Option<U
     })
 }
 
-#[mcache_macro::get("user2:{p.id}-{p.token}", ttl = 100)]
+#[mcache_attr::get("user2:{p.id}-{p.token}", ttl = 100)]
 async fn fetch_user_by_struct(p: &UserParam, cache_missed: &mut bool) -> Option<User> {
     println!("Async cache miss by param...");
     *cache_missed = true;
