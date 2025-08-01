@@ -10,5 +10,5 @@ proc-macro = true
 proc-macro2 = "1.0"
 quote        = "1.0"
 syn          = { version = "1.0", features = ["full"] }
-redis        = "0.23"
-serde        = { version = "1.0", features = ["derive"] }
+regex        = "1"
+mcache_core = { path = "../mcache_core" }

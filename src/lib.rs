@@ -1,5 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
+use regex::Regex;
 use syn::{parse_macro_input, AttributeArgs, ItemFn, Lit, Meta, NestedMeta};
 
 /// 属性宏：缓存读取，使用环境变量 MCACHE_REDIS_URI
@@ -29,22 +30,33 @@ pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_sig = &function.sig;
     let fn_block = &function.block;
 
-    // 收集所有参数标识符，用于占位替换
-    let idents: Vec<_> = function
-        .sig
-        .inputs
-        .iter()
-        .filter_map(|arg| {
-            if let syn::FnArg::Typed(pat_type) = arg {
-                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                    return Some(pat_ident.ident.clone());
-                }
-            }
-            None
-        })
-        .collect();
-    if idents.is_empty() {
-        panic!("Function must have at least one parameter");
+    // Grab the raw literal so we can regex it
+    let raw_template = key_template.clone();
+
+    // Build a regex to find {…} placeholders
+    let re = Regex::new(r"\{([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\}").unwrap();
+    // We'll collect one Quote‐fragment per match
+    let mut replaces = Vec::new();
+    for caps in re.captures_iter(&raw_template) {
+        let full = &caps[0]; // e.g. "{param.id}"
+        let path = &caps[1]; // e.g.  "param.id"
+
+        // turn "param.id.whatever" into a syn::Expr so we can generate code
+        let mut segments = path.split('.');
+        let first = syn::Ident::new(segments.next().unwrap(), proc_macro2::Span::call_site());
+        let mut expr = quote! { #first };
+        for segment in segments {
+            let seg = syn::Ident::new(segment, proc_macro2::Span::call_site());
+            expr = quote! { #expr.#seg };
+        }
+
+        // now generate a `cache_key = cache_key.replace("{param.id}", &param.id.to_string());`
+        replaces.push(quote! {
+            cache_key = cache_key.replace(
+                #full,
+                &(#expr).to_string(),
+            );
+        });
     }
 
     // 3. 判断是否 async
@@ -54,19 +66,13 @@ pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = if is_async {
         quote! {
             #fn_vis #fn_sig {
-                // 读取 Redis URI
-                let uri = std::env::var("MCACHE_REDIS_URI").expect("Env MCACHE_REDIS_URI not set");
-                let client = redis::Client::open(uri).expect("Redis URI invalid");
-                let mut conn = client.get_connection().expect("Failed to connect Redis");
+                let mut conn = mcache_core::CLIENT
+                    .get_connection()
+                    .expect("Failed to connect Redis");
 
                 // 构造缓存键，多参数占位
                 let mut cache_key = #key_template.to_string();
-                #(
-                    cache_key = cache_key.replace(
-                        concat!("{", stringify!(#idents), "}"),
-                        &#idents.to_string(),
-                    );
-                )*
+                #(#replaces)*
 
                 // 尝试命中缓存
                 if let Ok(cached) = redis::cmd("GET").arg(&cache_key).query::<String>(&mut conn) {
@@ -91,17 +97,12 @@ pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {
             #fn_vis #fn_sig {
-                let uri = std::env::var("MCACHE_REDIS_URI").expect("Env MCACHE_REDIS_URI not set");
-                let client = redis::Client::open(uri).expect("Redis URI invalid");
-                let mut conn = client.get_connection().expect("Failed to connect Redis");
+                let mut conn = mcache_core::CLIENT
+                    .get_connection()
+                    .expect("Failed to connect Redis");
 
                 let mut cache_key = #key_template.to_string();
-                #(
-                    cache_key = cache_key.replace(
-                        concat!("{", stringify!(#idents), "}"),
-                        &#idents.to_string(),
-                    );
-                )*
+                #(#replaces)*
 
                 if let Ok(cached) = redis::cmd("GET").arg(&cache_key).query::<String>(&mut conn) {
                     return serde_json::from_str(&cached).unwrap();
